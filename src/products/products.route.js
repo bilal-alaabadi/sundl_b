@@ -29,13 +29,15 @@ router.post("/create-product", async (req, res) => {
     const {
       name,
       category,
+      subcategory, // ✅ جديد
       description,
       oldPrice,
       price,
       image,
       author,
       size,
-      inStock
+      inStock,
+      stock,
     } = req.body;
 
     if (!name || !category || !description || !price || !image || !author) {
@@ -48,14 +50,15 @@ router.post("/create-product", async (req, res) => {
     const productData = {
       name,
       category,
+      subcategory: subcategory || "", // ✅ حفظ النوع
       description,
       price,
       oldPrice,
       image,
       author,
       size: size || null,
-      // إن لم تُرسل القيمة يأتي افتراضياً من الـ Schema = true
-      inStock: typeof inStock === 'boolean' ? inStock : true
+      inStock: typeof inStock === "boolean" ? inStock : true,
+      stock: stock != null ? Number(stock) : 0,
     };
 
     const newProduct = new Products(productData);
@@ -69,11 +72,14 @@ router.post("/create-product", async (req, res) => {
 });
 
 
+
+
 // جميع المنتجات
 router.get("/", async (req, res) => {
   try {
     const {
       category,
+      subcategory,   // ✅ أضفناه هنا
       size,
       color,
       minPrice,
@@ -86,9 +92,16 @@ router.get("/", async (req, res) => {
 
     if (category && category !== "all") {
       filter.category = category;
+
+      // لو كانت الفئة "حناء بودر" وفيه size
       if (category === "حناء بودر" && size) {
         filter.size = size;
       }
+    }
+
+    // ✅ فلترة بالنوع إن وُجد
+    if (subcategory && subcategory !== "all") {
+      filter.subcategory = subcategory;
     }
 
     if (color && color !== "all") filter.color = color;
@@ -118,6 +131,7 @@ router.get("/", async (req, res) => {
   }
 });
 
+
 // منتج واحد (يدعم مسارين)
 router.get(["/:id", "/product/:id"], async (req, res) => {
   try {
@@ -139,6 +153,7 @@ const multer = require("multer");
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
+// ========================= router.patch("/update-product/:id", ...) =========================
 router.patch(
   "/update-product/:id",
   verifyToken,
@@ -161,20 +176,47 @@ router.patch(
         description: req.body.description,
         size: req.body.size || null,
         author: req.body.author,
-        inStock: req.body.inStock === 'true',
-
+        inStock: req.body.inStock === 'true' || productExists.inStock,
       };
 
-      if (!updateData.name || !updateData.category || !updateData.price || !updateData.description) {
-        return res.status(400).send({ message: "جميع الحقول المطلوبة يجب إرسالها" });
+      // ✅ النوع: لو أرسلناه نحدّثه، لو ما أرسلناه نترك القديم
+      if (typeof req.body.subcategory === "string") {
+        updateData.subcategory = req.body.subcategory; // ممكن تكون "" لمسح النوع
+      }
+
+      // ✅ استلام وتحديث الكمية المتوفرة
+      if (typeof req.body.stock !== 'undefined' && req.body.stock !== '') {
+        const parsed = Math.max(0, Math.floor(Number(req.body.stock)));
+        if (Number.isNaN(parsed)) {
+          return res
+            .status(400)
+            .send({ message: "قيمة الكمية (المخزون) غير صالحة" });
+        }
+        updateData.stock = parsed;
+      }
+
+      if (
+        !updateData.name ||
+        !updateData.category ||
+        !updateData.price ||
+        !updateData.description
+      ) {
+        return res
+          .status(400)
+          .send({ message: "جميع الحقول المطلوبة يجب إرسالها" });
       }
       if (updateData.category === "حناء بودر" && !updateData.size) {
-        return res.status(400).send({ message: "يجب تحديد حجم الحناء" });
+        return res
+          .status(400)
+          .send({ message: "يجب تحديد حجم الحناء" });
       }
 
       // keepImages مُرسلة من الواجهة كنص JSON
       let keepImages = [];
-      if (typeof req.body.keepImages === "string" && req.body.keepImages.trim() !== "") {
+      if (
+        typeof req.body.keepImages === "string" &&
+        req.body.keepImages.trim() !== ""
+      ) {
         try {
           const parsed = JSON.parse(req.body.keepImages);
           if (Array.isArray(parsed)) keepImages = parsed;
@@ -187,7 +229,9 @@ router.patch(
       let newImageUrls = [];
       if (Array.isArray(req.files) && req.files.length > 0) {
         newImageUrls = await Promise.all(
-          req.files.map((file) => uploadBufferToCloudinary(file.buffer, "products"))
+          req.files.map((file) =>
+            uploadBufferToCloudinary(file.buffer, "products")
+          )
         );
       }
 
@@ -222,6 +266,8 @@ router.patch(
     }
   }
 );
+
+
 
 // حذف منتج
 router.delete("/:id", async (req, res) => {
